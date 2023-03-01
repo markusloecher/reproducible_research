@@ -1,0 +1,173 @@
+---
+title: "Effects of Sleep Loss"
+author: "Loecher"
+date: '2022-08-25'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reticulate)
+library(lubridate)
+library(readxl)
+library(emmeans)
+```
+
+Sleep loss leads to the withdrawal of human helping across individuals, groups, and large- scale societies
+
+Eti Ben Simon1, Raphael Vallat1, Aubrey Rossi1, Matthew P. Walker
+
+```{r}
+
+pbio <- read_excel("journal.pbio.3001733.s008.xlsx")
+pbio$day_of_year = yday(pbio$donation_date) 
+pbio_all <- read_excel("journal.pbio.3001733.s008.xlsx", sheet = "S3_Data_FigS2")
+length(unique(pbio_all$donation_date))
+```
+
+
+
+## Recreating Figure 3A
+
+
+```{r}
+hist(log(pbio_all$daily_donations_mean))
+mean(pbio_all$daily_donations_mean)
+```
+
+It almost looks as if the authors displayed the median
+
+```{r}
+median(pbio_all$daily_donations_mean)
+x = pbio_all$daily_donations_mean
+SE = mad(pbio_all$daily_donations_mean)/sqrt(nrow(pbio_all))*1.96
+print(SE)
+```
+
+
+```{r}
+#exp(mean(log(pbio_all$daily_donations_mean)))
+```
+
+```{python}
+import seaborn as sns
+import numpy as np
+df = r.pbio_all
+
+sns.kdeplot(data=df, x=np.log(df.daily_donations_mean), fill=True,bw_adjust=1.5);
+
+```
+
+```{r}
+
+```
+
+## Recreating Figure 3B
+
+```{r}
+
+lm3 <- glm(log(daily_donations_mean) ~ Type_of_week+Time_of_Day+ Weekend_day+ YEAR+MONTH+DAY_OF_WEEK+Holiday, family="gaussian", data=pbio)
+
+
+summary(lm3)
+```
+
+Why not a vanilla linear model ?
+
+```{r}
+lm3 <- lm(log(daily_donations_mean) ~ Type_of_week+Time_of_Day+ Weekend_day+ YEAR+MONTH+DAY_OF_WEEK+Holiday,  data=pbio)
+summary(lm3)
+```
+
+
+
+```{r}
+emmeans(lm3, ~ Type_of_week)
+plot(emmeans(lm3, ~ Type_of_week))
+```
+Do we not have to code up month and  DAY_OF_WEEK as factors?
+
+```{r}
+pbio_dummy = pbio
+pbio_dummy$MONTH = as.factor(pbio_dummy$MONTH)
+pbio_dummy$DAY_OF_WEEK = as.factor(pbio_dummy$DAY_OF_WEEK)
+
+lm_dummy <- lm(log(daily_donations_mean) ~ Type_of_week+Time_of_Day+ Weekend_day+ YEAR+MONTH+DAY_OF_WEEK+Holiday,  data=pbio_dummy)
+summary(lm_dummy)
+```
+
+## Constructing our own data
+
+```{r}
+library(timeDate);#library(chron)
+#As of June 2021, there are eleven annual federal holidays in the United States, and one additional quadrennial holiday (Inauguration Day)
+#There must be more school holidays, possibly different from state to state
+
+hlist <- c("USChristmasDay","USGoodFriday","USIndependenceDay","USLaborDay",
+           "USNewYearsDay","USThanksgivingDay")        
+holidays2000_2016  <- as.Date(timeDate::holiday(2000:2016,hlist))
+
+#is.holiday(as.Date("2013-11-28"),myholidays)
+```
+
+
+```{r}
+pbio_all$MONTH = lubridate::month(pbio_all$donation_date)
+pbio_all$YEAR = lubridate::year(pbio_all$donation_date)
+pbio_all$DAY_OF_WEEK = lubridate::wday(pbio_all$donation_date)
+#try lubridate::wday(as.Date("2023-02-19"))
+pbio_all$Weekend_day = (pbio_all$DAY_OF_WEEK %in% c(1,7))#Sunday=1, Saturday=7!
+pbio_all$Holiday = as.Date(pbio_all$donation_date) %in% holidays2000_2016
+pbio_all$day_of_year = lubridate::yday(pbio_all$donation_date) 
+#make lookup table:
+Type_of_week = as.data.frame(unique(pbio_dummy[,c("donation_date", "Type_of_week", "Holiday")]))
+rownames(Type_of_week) = Type_of_week$donation_date
+pbio_all$Type_of_week = Type_of_week[as.character(pbio_all$donation_date), "Type_of_week"]
+sum(is.na(pbio_all$Type_of_week))
+pbio_all$Type_of_week[is.na(pbio_all$Type_of_week)] = "Regular"
+
+pbio_all$MONTH = as.factor(pbio_all$MONTH)
+pbio_all$DAY_OF_WEEK = as.factor(pbio_all$DAY_OF_WEEK)
+#mean(pbio_dummy$donation_date %in% pbio_all$donation_date)
+#table(table(pbio_dummy$donation_date))
+#table(table(pbio_all$donation_date))
+
+#tmp = merge(pbio_all, pbio_dummy[,c("donation_date", "Type_of_week")], by = "donation_date", all.x = TRUE)
+
+lm_dummy <- lm(log(daily_donations_mean) ~ Type_of_week+ Weekend_day+ YEAR+MONTH+DAY_OF_WEEK+Holiday,  data=pbio_all)#+Time_of_Day
+summary(lm_dummy)
+
+```
+
+## GAM models
+
+```{r}
+library(mgcv)
+gam_dummy <- gam(log(daily_donations_mean) ~ Type_of_week+ Weekend_day+ s(YEAR, k=3) +DAY_OF_WEEK+Holiday + s(day_of_year,k=8), family=gaussian(),  data=pbio_all)#+Time_of_Day +MONTH
+summary(gam_dummy)
+plot(gam_dummy)
+```
+
+
+## Old Code
+
+```{r}
+library(dplyr)
+
+pbioDonations <-  pbio %>% group_by(donation_date) %>% summarise(daily_donations_sum = sum(daily_donations_mean), Type_of_week = unique(Type_of_week)) %>% 
+  group_by(Type_of_week) %>% summarise(daily_donations_avg = mean(daily_donations_sum), daily_donations_sd = sd(daily_donations_sum), cts = n())
+```
+
+
+```{r}
+hist(pbio$daily_donations_mean)
+```
+
+```{r}
+n = 2:20
+plot(n, (n+2)/n/(n+1), type = "l");grid()
+lines(n, 1/(n-1), type = "l", col=2)
+lines(n, 1/(n), type = "l", col=3)
+
+```
+
